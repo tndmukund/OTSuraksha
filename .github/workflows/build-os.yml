@@ -1,0 +1,51 @@
+name: Build OT Sense OS images
+# Upload os-source.zip to the root of the repo, then Actions > this workflow > Run workflow.
+# Result: a GitHub Release with otsense-sensor.img (x86 VM / PC) and otsense-sensor-rpi.img.xz (Raspberry Pi).
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub Release with the images"
+        type: boolean
+        default: true
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack the sources
+        run: test -f os-source.zip || (echo "os-source.zip is missing in the repo root"; exit 1)
+      - name: Unzip
+        run: mkdir -p _src; unzip -q os-source.zip -d _src; test -f _src/otsense-os/build-image.sh; test -f _src/sensor-src/otsense.py
+      - name: Offline tests
+        run: python3 _src/otsense-os/tests/test_prep.py
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc 2>/dev/null || true; df -h /
+      - name: Build image (${{ matrix.arch }})
+        run: sudo -E bash _src/otsense-os/build-image.sh ${{ matrix.arch }} "$PWD/_src/sensor-src" "$PWD/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: otsense-os-${{ matrix.arch }}
+          path: out/*
+          compression-level: 0
+  release:
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ls -lh out; gh release create "os-${{ github.run_number }}" out/* --repo "$GITHUB_REPOSITORY" --title "OT Sense OS build ${{ github.run_number }}" --notes "otsense-sensor.img = x86-64 disk (VM / PC / mini-PC). otsense-sensor-rpi.img.xz = Raspberry Pi 3/4/5 SD card. Copy the release links into central > Sites > Base images."
+        
