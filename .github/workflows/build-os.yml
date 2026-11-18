@@ -54,6 +54,8 @@ jobs:
           test -f _src/sensor-src/otsense.py
       - name: Build the sensor ISO (inside a Debian 12 container)
         run: sudo -E OUT_DIR="$PWD/out" bash _src/sensor-image/docker-build.sh iso-amd64 "$PWD/_src/sensor-src"
+      - name: Check the ISO has the graphical screen, text screen and sensor
+        run: sudo bash _src/sensor-image/ci-check.sh out/otsense-sensor.iso
       - name: Wrap the ISO into an OVA (ready-made VM, 4 ports)
         run: |
           sudo chown -R "$(id -u):$(id -g)" out      # the ISO step ran as root inside Docker
@@ -80,3 +82,4 @@ jobs:
           gh release create "os-${{ github.run_number }}" out/* --repo "$GITHUB_REPOSITORY" \
             --title "OT Sense OS build ${{ github.run_number }}" \
             --notes "otsense-sensor.img = x86-64 disk (Hyper-V / KVM / PC). otsense-sensor.iso = x86-64 live ISO (bare metal USB, any hypervisor). otsense-sensor.ova = ready-made VM (VMware, VirtualBox). otsense-sensor-rpi.img.xz = Raspberry Pi 3/4/5 SD card. Copy the release links into central > Sites > Base images."
+            
