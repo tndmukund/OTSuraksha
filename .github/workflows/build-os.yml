@@ -1,7 +1,9 @@
 name: Build OT Sense OS images
 # Upload os-source.zip (folders otsense-os/ and sensor-src/ inside) to the root of the repo, then Actions > this workflow > Run workflow.
-# Result: a GitHub Release with  otsense-sensor.img (x86 disk: Hyper-V / KVM / PC),  otsense-sensor-rpi.img.xz (Raspberry Pi SD card),
-#         otsense-sensor.iso (x86 live ISO: bare metal USB, any hypervisor)  and  otsense-sensor.ova (ready-made VM: VMware, VirtualBox).
+# New in this build: every image has a REMOTE ACCESS (SRA) port - choose it on the sensor screen (button "Remote access port (SRA)" / key S),
+# give it its own fixed IP and optional VLAN; engineer sessions started from central then leave through that port only.
+# Result: a GitHub Release with otsense-sensor.img (x86 disk: Hyper-V / KVM / PC), otsense-sensor-rpi.img.xz (Raspberry Pi SD card),
+# otsense-sensor.iso (x86 live ISO: bare metal USB, any hypervisor) and otsense-sensor.ova (ready-made VM: VMware, VirtualBox).
 on:
   workflow_dispatch:
     inputs:
@@ -28,8 +30,12 @@ jobs:
           mkdir -p _src && unzip -q os-source.zip -d _src
           test -f _src/otsense-os/build-image.sh
           test -f _src/sensor-src/otsense.py
-      - name: Offline tests
+      - name: Offline tests (boot logic + remote access (SRA) port)
         run: PYTHONDONTWRITEBYTECODE=1 python3 _src/otsense-os/tests/test_prep.py
+      - name: Check the sensor program carries the SRA binding
+        run: |
+          grep -q 'OTSENSE_SRA_IP' _src/sensor-src/otsense.py
+          test -f _src/otsense-os/overlay/opt/otsense/otsense-sra.py
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc 2>/dev/null || true; df -h /
       - name: Build image (${{ matrix.arch }})
@@ -52,6 +58,17 @@ jobs:
           test -f _src/sensor-image/build-iso.sh
           test -f _src/otsense-os/make-ova.sh
           test -f _src/sensor-src/otsense.py
+          test -f _src/sensor-image/iso/otsense-sra.py
+      - name: Dry-run the remote access (SRA) port on the ISO screen logic
+        run: |
+          set -e
+          mkdir -p /tmp/st /tmp/rn
+          echo '{"port":"eth2","vlan":100,"ip_cidr":"10.30.0.9/24","gateway":"10.30.0.1"}' > /tmp/st/sra.json
+          export DRY_RUN=1 NICS="eth0 eth1 eth2" STATE=/tmp/st RUN=/tmp/rn D="$PWD/_src/sensor-image/iso"
+          python3 "$D/otsense-console.py" --ports | tee /tmp/ports.txt
+          grep -q "^SRA=eth2" /tmp/ports.txt && grep -q "^CAP=eth1$" /tmp/ports.txt
+          python3 "$D/otsense-console.py" --net | grep -q "ip link add link eth2 name sra100 type vlan id 100"
+          grep -q "OTSENSE_SRA_IP=10.30.0.9" /tmp/rn/sra.env
       - name: Build the sensor ISO (inside a Debian 12 container)
         run: sudo -E OUT_DIR="$PWD/out" bash _src/sensor-image/docker-build.sh iso-amd64 "$PWD/_src/sensor-src"
       - name: Check the ISO has the graphical screen, text screen and sensor
@@ -81,5 +98,4 @@ jobs:
           ls -lh out
           gh release create "os-${{ github.run_number }}" out/* --repo "$GITHUB_REPOSITORY" \
             --title "OT Sense OS build ${{ github.run_number }}" \
-            --notes "otsense-sensor.img = x86-64 disk (Hyper-V / KVM / PC). otsense-sensor.iso = x86-64 live ISO (bare metal USB, any hypervisor). otsense-sensor.ova = ready-made VM (VMware, VirtualBox). otsense-sensor-rpi.img.xz = Raspberry Pi 3/4/5 SD card. Copy the release links into central > Sites > Base images."
-            
+            --notes "NEW: remote access (SRA) port on every image - on the sensor screen press Remote access port (SRA) / key S: choose a free wired port, give it a fixed IP (and VLAN); engineer sessions from central leave through it only. otsense-sensor.img = x86-64 disk (Hyper-V / KVM / PC). otsense-sensor.iso = x86-64 live ISO (bare metal USB, any hypervisor). otsense-sensor.ova = ready-made VM (VMware, VirtualBox). otsense-sensor-rpi.img.xz = Raspberry Pi 3/4/5 SD card. Copy the release links into central > Sites > Base images."
